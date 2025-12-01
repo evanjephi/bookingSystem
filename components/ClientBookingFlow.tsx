@@ -13,6 +13,9 @@ interface ClientBookingFlowProps {
   onBookingComplete: () => void;
   onCancel: () => void;
   onClose: () => void;
+  sessionRole: 'admin' | 'worker' | 'client';
+  sessionClientId?: string | null;
+  sessionWorkerId?: string | null;
 }
 
 export default function ClientBookingFlow({
@@ -21,7 +24,10 @@ export default function ClientBookingFlow({
   initialClient,
   onBookingComplete,
   onCancel,
-  onClose
+  onClose,
+  sessionRole,
+  sessionClientId,
+  sessionWorkerId,
 }: ClientBookingFlowProps) {
   const [step, setStep] = useState<'select-client' | 'select-date-time' | 'confirm'>(initialClient ? 'select-date-time' : 'select-client');
   const [selectedClient, setSelectedClient] = useState<Client | null>(initialClient ?? null);
@@ -100,6 +106,15 @@ export default function ClientBookingFlow({
       return;
     }
 
+    if (isRecurring && recurrenceEndDate) {
+      const start = toLocalDate(selectedDates[0]);
+      const end = toLocalDate(recurrenceEndDate);
+      if (end < start) {
+        setError('Recurring series end date must be after the first selected date.');
+        return;
+      }
+    }
+
     if (
       isRecurring &&
       (recurrenceFrequency === 'weekly' || recurrenceFrequency === 'biweekly') &&
@@ -115,15 +130,19 @@ export default function ClientBookingFlow({
   const buildRecurringPattern = (): RecurringPattern | undefined => {
     if (!isRecurring || selectedDates.length === 0) return undefined;
 
+    const startDate = toLocalDate(selectedDates[0]);
+    const endDate = recurrenceEndDate ? toLocalDate(recurrenceEndDate) : startDate;
+
     return {
       frequency: recurrenceFrequency,
-      endDate: recurrenceEndDate ? toLocalDate(recurrenceEndDate) : undefined,
+      startDate,
+      endDate,
       daysOfWeek:
         recurrenceFrequency === 'monthly'
           ? undefined
           : recurrenceDaysOfWeek.length > 0
             ? recurrenceDaysOfWeek
-            : [toLocalDate(selectedDates[0]).getDay()],
+            : [startDate.getDay()],
     };
   };
 
@@ -166,7 +185,13 @@ export default function ClientBookingFlow({
         : selectedDates.map((date) => makeBookingPayload(date));
 
       // Save to Firebase (POST to a new endpoint or update existing bookings)
-      const res = await fetch('/api/bookings', {
+      const params = new URLSearchParams();
+      params.set('role', sessionRole);
+      if (sessionClientId) params.set('clientId', sessionClientId);
+      if (sessionWorkerId) params.set('workerId', sessionWorkerId);
+      const endpoint = `/api/bookings?${params.toString()}`;
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bookings }),
