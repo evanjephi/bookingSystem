@@ -1,0 +1,42 @@
+{
+  "name": "smart-calendar-ai",
+  "version": "1.0.0",
+  "description": "AI-powered calendar booking application for multiple users",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "seed": "node scripts/seed-firebase.js",
+    "seed:chunk": "node scripts/seed-firebase-chunked.js 10 5"
+  },
+  "dependencies": {
+    "@openrouter/sdk": "^0.1.13",
+    "axios": "^1.6.2",
+    "chrono-node": "^2.9.0",
+    "date-fns": "^2.30.0",
+    "firebase": "^12.6.0",
+    "firebase-admin": "^13.6.0",
+    "lucide-react": "^0.292.0",
+    "next": "^15.0.0",
+    "openai": "^4.52.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.3.3",
+    "zustand": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.42",
+    "@types/react-dom": "^18.2.17",
+    "@typescript-eslint/eslint-plugin": "^6.13.1",
+    "@typescript-eslint/parser": "^6.13.1",
+    "autoprefixer": "^10.4.16",
+    "dotenv": "^17.2.3",
+    "eslint": "^8.55.0",
+    "eslint-config-next": "^15.0.0",
+    "postcss": "^8.4.31",
+    "tailwindcss": "^3.3.6"
+  }
+}
