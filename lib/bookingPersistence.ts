@@ -44,6 +44,26 @@ interface PreparedBooking {
   payload: Record<string, unknown>;
 }
 
+function pruneUndefinedValues(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => pruneUndefinedValues(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (value && typeof value === 'object' && value.constructor === Object) {
+    return Object.entries(value).reduce<Record<string, unknown>>((acc, [key, val]) => {
+      const sanitized = pruneUndefinedValues(val);
+      if (sanitized !== undefined) {
+        acc[key] = sanitized;
+      }
+      return acc;
+    }, {});
+  }
+
+  return value === undefined ? undefined : value;
+}
+
 function timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map((value) => parseInt(value, 10));
   return (hours || 0) * 60 + (minutes || 0);
@@ -372,7 +392,9 @@ export async function validateAndSaveBookings(bookings: BookingPayload[] | undef
       createdAt: admin.firestore.Timestamp.fromDate(createdAt),
     } as Record<string, unknown>;
 
-    prepared.push({ docRef, payload });
+    const sanitizedPayload = pruneUndefinedValues(payload) as Record<string, unknown>;
+
+    prepared.push({ docRef, payload: sanitizedPayload });
   }
 
   const batch = db.batch();
