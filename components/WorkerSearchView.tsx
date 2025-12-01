@@ -8,6 +8,9 @@ import { Search, MapPin, DollarSign } from 'lucide-react';
 interface WorkerSearchViewProps {
   onWorkerSelect: (worker: PSWWorker) => void;
   selectedClient?: Client | null;
+  sessionRole: 'admin' | 'worker' | 'client';
+  sessionClientId?: string | null;
+  sessionWorkerId?: string | null;
 }
 
 const extractCityFromAddress = (value: string): string => {
@@ -21,7 +24,13 @@ const extractCityFromAddress = (value: string): string => {
   return value.trim();
 };
 
-export default function WorkerSearchView({ onWorkerSelect, selectedClient }: WorkerSearchViewProps) {
+export default function WorkerSearchView({
+  onWorkerSelect,
+  selectedClient,
+  sessionRole,
+  sessionClientId,
+  sessionWorkerId,
+}: WorkerSearchViewProps) {
   const [workers, setWorkers] = useState<PSWWorker[]>([]);
   const [filteredWorkers, setFilteredWorkers] = useState<PSWWorker[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,8 +73,12 @@ export default function WorkerSearchView({ onWorkerSelect, selectedClient }: Wor
         if (activeFilters.clientLocation.trim()) params.set('clientLocation', extractCityFromAddress(activeFilters.clientLocation.trim()));
         if (activeFilters.matchClientCityOnly) params.set('matchClientCityOnly', 'true');
 
+        params.set('role', sessionRole);
+        if (sessionClientId) params.set('clientId', sessionClientId);
+        if (sessionWorkerId) params.set('workerId', sessionWorkerId);
+
         const query = params.toString();
-        const url = query ? `/api/psw-workers?${query}` : '/api/psw-workers';
+        const url = `/api/psw-workers?${query}`;
 
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) {
@@ -94,7 +107,7 @@ export default function WorkerSearchView({ onWorkerSelect, selectedClient }: Wor
       isActive = false;
       controller.abort();
     };
-  }, [activeFilters]);
+  }, [activeFilters, sessionRole, sessionClientId, sessionWorkerId]);
 
   useEffect(() => {
     if (selectedClient?.location) {
