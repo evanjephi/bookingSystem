@@ -150,12 +150,12 @@ function expandRecurringBookings(bookings: BookingPayload[]): BookingPayload[] {
 
 function generateRecurringOccurrences(booking: BookingPayload): BookingPayload[] {
   const occurrences: BookingPayload[] = [];
-  const baseDate = toLocalDate(booking.date as string | Date);
   const pattern = booking.recurringPattern as RecurringPattern;
-  const endDate = pattern.endDate ? toLocalDate(pattern.endDate) : baseDate;
+  const startDate = pattern.startDate ? toLocalDate(pattern.startDate) : toLocalDate(booking.date as string | Date);
+  const endDate = pattern.endDate ? toLocalDate(pattern.endDate) : startDate;
 
-  if (isAfter(baseDate, endDate)) {
-    return [booking];
+  if (isAfter(startDate, endDate)) {
+    return [{ ...booking, date: formatLocalDate(startDate), recurringPattern: undefined }];
   }
 
   const addOccurrence = (date: Date) => {
@@ -172,12 +172,11 @@ function generateRecurringOccurrences(booking: BookingPayload): BookingPayload[]
     });
   };
 
-  const daysBetween = differenceInDays(endDate, baseDate);
-
   switch (pattern.frequency) {
     case 'daily': {
-      for (let i = 0; i <= daysBetween; i++) {
-        addOccurrence(addDays(baseDate, i));
+      const totalDays = Math.max(differenceInDays(endDate, startDate), 0);
+      for (let i = 0; i <= totalDays; i++) {
+        addOccurrence(addDays(startDate, i));
       }
       break;
     }
@@ -185,20 +184,43 @@ function generateRecurringOccurrences(booking: BookingPayload): BookingPayload[]
     case 'biweekly': {
       const daysOfWeek = pattern.daysOfWeek && pattern.daysOfWeek.length > 0
         ? pattern.daysOfWeek
-        : [baseDate.getDay()];
+        : [startDate.getDay()];
+      const baseDay = startDate.getDay();
+      const offsets = daysOfWeek
+        .map((day) => {
+          let diff = day - baseDay;
+          if (diff < 0) diff += 7;
+          return diff;
+        })
+        .sort((a, b) => a - b);
 
-      for (let i = 0; i <= daysBetween; i++) {
-        const current = addDays(baseDate, i);
-        const diff = differenceInDays(current, baseDate);
-        const withinInterval = pattern.frequency === 'weekly' || Math.floor(diff / 7) % 2 === 0;
-        if (withinInterval && daysOfWeek.includes(current.getDay())) {
-          addOccurrence(current);
+      const weekStride = pattern.frequency === 'weekly' ? 7 : 14;
+      let iteration = 0;
+      let continueLoop = true;
+
+      while (continueLoop) {
+        continueLoop = false;
+        for (const offset of offsets) {
+          const occurrenceDate = addDays(startDate, iteration * weekStride + offset);
+          if (occurrenceDate < startDate) {
+            continue;
+          }
+          if (occurrenceDate > endDate) {
+            continueLoop = false;
+            break;
+          }
+          addOccurrence(occurrenceDate);
+          continueLoop = true;
+        }
+        iteration += 1;
+        if (addDays(startDate, iteration * weekStride) > endDate) {
+          break;
         }
       }
       break;
     }
     case 'monthly': {
-      let current = new Date(baseDate);
+      let current = new Date(startDate);
       while (current <= endDate) {
         addOccurrence(current);
         current = addMonths(current, 1);
@@ -206,7 +228,7 @@ function generateRecurringOccurrences(booking: BookingPayload): BookingPayload[]
       break;
     }
     default: {
-      addOccurrence(baseDate);
+      addOccurrence(startDate);
     }
   }
 
