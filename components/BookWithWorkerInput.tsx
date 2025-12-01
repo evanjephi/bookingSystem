@@ -8,6 +8,9 @@ import { toLocalDate } from '@/lib/dateUtils';
 interface BookWithWorkerInputProps {
   selectedClient: Client | null;
   onBookingSuccess?: () => void;
+  sessionRole: 'admin' | 'worker' | 'client';
+  sessionClientId?: string | null;
+  sessionWorkerId?: string | null;
 }
 
 interface BookingResponse {
@@ -25,7 +28,13 @@ interface BookingResponse {
   };
 }
 
-export default function BookWithWorkerInput({ selectedClient, onBookingSuccess }: BookWithWorkerInputProps) {
+export default function BookWithWorkerInput({
+  selectedClient,
+  onBookingSuccess,
+  sessionRole,
+  sessionClientId,
+  sessionWorkerId,
+}: BookWithWorkerInputProps) {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<BookingResponse | null>(null);
@@ -41,7 +50,13 @@ export default function BookWithWorkerInput({ selectedClient, onBookingSuccess }
     setResult(null);
 
     try {
-      const res = await fetch('/api/book-with-worker', {
+      const params = new URLSearchParams();
+      params.set('role', sessionRole);
+      if (sessionClientId) params.set('clientId', sessionClientId);
+      if (sessionWorkerId) params.set('workerId', sessionWorkerId);
+      const endpoint = `/api/book-with-worker?${params.toString()}`;
+
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
