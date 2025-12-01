@@ -3,11 +3,29 @@ import { getFirestore } from '@/lib/firebaseAdmin';
 import { TimeSlot } from '@/types';
 import admin from 'firebase-admin';
 import { formatLocalDate, toLocalDate } from '@/lib/dateUtils';
+import { getRequestSession } from '@/lib/session';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const session = getRequestSession(request);
     const db = getFirestore();
-    const snap = await db.collection('bookings').get();
+    let query: FirebaseFirestore.Query = db.collection('bookings');
+
+    if (session.role === 'worker') {
+      const workerId = session.relatedWorkerId;
+      if (!workerId) {
+        return NextResponse.json({ error: 'Worker ID required for worker role' }, { status: 403 });
+      }
+      query = query.where('pswWorkerId', '==', workerId);
+    } else if (session.role === 'client') {
+      const clientId = session.relatedClientId;
+      if (!clientId) {
+        return NextResponse.json({ error: 'Client ID required for client role' }, { status: 403 });
+      }
+      query = query.where('clientId', '==', clientId);
+    }
+
+    const snap = await query.get();
     const bookings = snap.docs.map((doc) => {
       const data = doc.data();
       // Handle date - if it's a Timestamp, convert to local date string
