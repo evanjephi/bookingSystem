@@ -110,7 +110,7 @@ export default function BookWithWorkerInput({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder='Example: "book a meeting with Barbara Johnson at 9am-12pm on december 10"'
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-20"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none h-20 bg-slate-800 text-white"
           />
           <p className="text-xs text-gray-500 mt-1">
             Describe who (PSW worker name), when (time), and which days you want to book.
