@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 //import NaturalLanguageInput from '@/components/NaturalLanguageInput';
 import CalendarView from '@/components/CalendarView';
 import BookingSummary from '@/components/BookingSummary';
@@ -11,6 +11,8 @@ import WorkerSearchView from '@/components/WorkerSearchView';
 import WorkerProfileModal from '@/components/WorkerProfileModal';
 import ClientBookingFlow from '@/components/ClientBookingFlow';
 import BookWithWorkerInput from '@/components/BookWithWorkerInput';
+import ClientDashboard from '@/components/ClientDashboard';
+import PSWDashboard from '@/components/PSWDashboard';
 import { useCalendarStore } from '@/lib/store';
 import { createBookingSlots } from '@/lib/bookingEngine';
 import { BookingResult, TimeSlot, PSWWorker, Client } from '@/types';
@@ -42,6 +44,7 @@ const normalizeRole = (value: string | null): 'admin' | 'worker' | 'client' => {
 export default function Home() {
   const { users, timeSlots, addTimeSlot, setTimeSlots } = useCalendarStore();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const sessionRole = normalizeRole(searchParams.get('role'));
   const sessionClientId = searchParams.get('clientId');
   const sessionWorkerId = searchParams.get('workerId');
@@ -63,6 +66,8 @@ export default function Home() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedDateSlots, setSelectedDateSlots] = useState<TimeSlot[] | null>(null);
   const [showDateModal, setShowDateModal] = useState(false);
+  const [selectedWorkerData, setSelectedWorkerData] = useState<PSWWorker | null>(null);
+  const [workers, setWorkers] = useState<PSWWorker[]>([]);
 
   // Fetch clients on mount
   useEffect(() => {
@@ -80,6 +85,22 @@ export default function Home() {
     fetchClients();
   }, []);
 
+  // Fetch workers on mount
+  useEffect(() => {
+    const fetchWorkers = async () => {
+      try {
+        const res = await fetch('/api/psw-workers');
+        if (!res.ok) throw new Error('Failed to fetch workers');
+        const data = await res.json();
+        setWorkers(data.workers || []);
+      } catch (err) {
+        console.warn('Error fetching workers:', err);
+      }
+    };
+
+    fetchWorkers();
+  }, []);
+
   useEffect(() => {
     if (sessionRole === 'client' && sessionClientId && clients.length > 0) {
       const match = clients.find((client) => client.id === sessionClientId);
@@ -88,6 +109,35 @@ export default function Home() {
       }
     }
   }, [sessionRole, sessionClientId, clients]);
+
+  useEffect(() => {
+    if (sessionRole === 'worker' && sessionWorkerId && workers.length > 0) {
+      const match = workers.find((worker) => worker.id === sessionWorkerId);
+      if (match) {
+        setSelectedWorkerData(match);
+      }
+    }
+  }, [sessionRole, sessionWorkerId, workers]);
+
+  // If client role, show the simplified client dashboard
+  if (sessionRole === 'client') {
+    return (
+      <ClientDashboard
+        client={selectedClient}
+        onBack={() => router.push('/')}
+      />
+    );
+  }
+
+  // If worker role, show the PSW worker dashboard
+  if (sessionRole === 'worker') {
+    return (
+      <PSWDashboard
+        worker={selectedWorkerData}
+        onBack={() => router.push('/')}
+      />
+    );
+  }
 
   // Fetch bookings from Firebase on page load
   useEffect(() => {
