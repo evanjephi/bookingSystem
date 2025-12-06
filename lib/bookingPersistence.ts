@@ -262,169 +262,201 @@ export async function validateAndSaveBookings(bookings: BookingPayload[] | undef
     throw new BookingError('No bookings provided', 400);
   }
 
-  const bookingsToProcess = expandRecurringBookings(bookings);
   const db = getFirestore();
-  const prepared: PreparedBooking[] = [];
+  const batch = db.batch();
 
-  for (const booking of bookingsToProcess) {
+  for (const booking of bookings) {
     if (!booking.id) {
       throw new BookingError('Each booking must have an id field', 400);
     }
 
-    if (!booking.date) {
-      throw new BookingError(`Booking ${booking.id} is missing a date field`, 400);
-    }
-
-    const workerId = booking.pswWorkerId || booking.userId;
-    if (!workerId) {
-      throw new BookingError(`Booking ${booking.id} is missing worker/user ID`, 400);
-    }
-
-    const clientId = booking.clientId;
-    if (!clientId) {
-      throw new BookingError(`Booking ${booking.id} is missing client ID`, 400);
-    }
-
-    const localDate = toLocalDate(booking.date as string | Date);
-    const dateString = formatLocalDate(localDate);
-
-    const workerDoc = await db.collection('psw_workers').doc(workerId).get();
-    if (!workerDoc.exists) {
-      throw new BookingError(`PSW worker with ID ${workerId} not found`, 404);
-    }
-
-    const workerData = workerDoc.data() as PSWWorker;
-    const workerName = booking.pswWorkerName || `${workerData?.firstName ?? ''} ${workerData?.lastName ?? ''}`.trim() || 'Worker';
-
-    const clientDoc = await db.collection('clients').doc(clientId).get();
-    if (!clientDoc.exists) {
-      throw new BookingError(`Client with ID ${clientId} not found`, 404);
-    }
-    const clientData = clientDoc.data() as Client;
-
-    const workerLocation = (workerData.location || '').trim().toLowerCase();
-    const clientLocation = (clientData.location || '').trim().toLowerCase();
-
-    if (!workerLocation || !clientLocation || workerLocation !== clientLocation) {
-      throw new BookingError(
-        `${workerName} is not available because they are located in ${workerData.location || 'a different city'}. ` +
-          `Clients can only book PSW workers within ${clientData.location || 'their own city'}.`,
-        409,
-        {
-          workerLocation: workerData.location || null,
-          clientLocation: clientData.location || null,
-        }
-      );
-    }
-
-    const startTime = booking.startTime || '09:00';
-    const endTime = booking.endTime || '10:00';
-    const durationMinutes = Math.max(timeToMinutes(endTime) - timeToMinutes(startTime), 0);
-    if (durationMinutes <= 0) {
-      throw new BookingError(`Invalid time range for booking ${booking.id}`, 400);
-    }
-
-    ensureAdvanceNotice(localDate, startTime);
-
-    const serviceLevel: ServiceLevel = booking.serviceLevel || 'basic';
-    if (workerData.serviceLevels && !workerData.serviceLevels.includes(serviceLevel)) {
-      throw new BookingError(
-        `${workerName} does not offer the ${serviceLevel} service level.`,
-        409
-      );
-    }
-
-    const workerDayAvailability = (workerData.availability || []).filter((avail) => {
-      if (avail.dayOfWeek === undefined || avail.dayOfWeek === null) return false;
-      return avail.dayOfWeek === localDate.getDay();
-    });
-
-    if (workerDayAvailability.length === 0) {
-      throw new BookingError(`${workerName} is not available on ${dateString}`, 409);
-    }
-
-    const withinAvailability = workerDayAvailability.some((avail) => {
-      const availStart = timeToMinutes(avail.startTime);
-      const availEnd = timeToMinutes(avail.endTime);
-      const newStart = timeToMinutes(startTime);
-      const newEnd = timeToMinutes(endTime);
-      return newStart >= availStart && newEnd <= availEnd;
-    });
-
-    if (!withinAvailability) {
-      throw new BookingError(`${workerName} is not available at ${startTime}-${endTime} on ${dateString}`, 409);
-    }
-
-    const bookingsSnapshot = await db
-      .collection('bookings')
-      .where('pswWorkerId', '==', workerId)
-      .where('date', '==', dateString)
-      .get();
-
-    const existingBookingsFromCollection = bookingsSnapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ...data,
-      };
-    });
-
-    const workerBookings = Array.isArray(workerData.bookings) ? normalizeWorkerBookings(workerData.bookings) : [];
-    const collectionWorkerBookings = normalizeWorkerBookings(existingBookingsFromCollection);
-
-    const combinedBookingsMap = new Map<string, WorkerBooking>();
-    for (const wb of [...workerBookings, ...collectionWorkerBookings]) {
-      combinedBookingsMap.set(wb.id, wb);
-    }
-
-    const combinedBookings = Array.from(combinedBookingsMap.values());
-    const newStart = timeToMinutes(startTime);
-    const newEnd = timeToMinutes(endTime);
-
-    const hasConflict = combinedBookings.some((existing) => {
-      const existingStart = timeToMinutes(existing.startTime);
-      const existingEnd = timeToMinutes(existing.endTime);
-      return newStart < existingEnd && newEnd > existingStart && formatLocalDate(existing.date) === dateString;
-    });
-
-    if (hasConflict) {
-      throw new BookingError(
-        `${workerName} already has a booking at ${startTime}-${endTime} on ${dateString}. Please choose a different time.`,
-        409
-      );
-    }
-
     const docRef = db.collection('bookings').doc(booking.id);
-    const createdAt = booking.createdAt ? new Date(booking.createdAt as string | Date) : new Date();
-    const requestedAt = booking.requestedAt ? new Date(booking.requestedAt as string | Date) : new Date();
-    const confirmationDeadline = booking.confirmationDeadline
-      ? new Date(booking.confirmationDeadline as string | Date)
-      : addHours(requestedAt, CONFIRMATION_WINDOW_HOURS);
-    const price = booking.price ?? calculatePrice(workerData.hourlyRate, serviceLevel, durationMinutes);
 
-    const payload = {
-      ...booking,
-      pswWorkerId: workerId,
-      date: dateString,
-      serviceLevel,
-      price,
-      status: (booking.status as BookingStatus) || 'pending',
-      requestedAt: admin.firestore.Timestamp.fromDate(requestedAt),
-      confirmationDeadline: admin.firestore.Timestamp.fromDate(confirmationDeadline),
-      createdAt: admin.firestore.Timestamp.fromDate(createdAt),
-    } as Record<string, unknown>;
+    // Check if this is a simple update (only status, date, time changes)
+    const isSimpleUpdate = !booking.pswWorkerId && !booking.clientId && !booking.serviceLevel;
 
-    const sanitizedPayload = pruneUndefinedValues(payload) as Record<string, unknown>;
+    if (isSimpleUpdate) {
+      // Simple update: only update the provided fields
+      const updatePayload: Record<string, unknown> = {};
+      
+      if (booking.status) {
+        updatePayload.status = booking.status;
+      }
+      if (booking.date) {
+        const localDate = toLocalDate(booking.date as string | Date);
+        updatePayload.date = formatLocalDate(localDate);
+      }
+      if (booking.startTime) {
+        updatePayload.startTime = booking.startTime;
+      }
+      if (booking.endTime) {
+        updatePayload.endTime = booking.endTime;
+      }
+      if (booking.cancellationReason) {
+        updatePayload.cancellationReason = booking.cancellationReason;
+      }
 
-    prepared.push({ docRef, payload: sanitizedPayload });
-  }
+      batch.update(docRef, updatePayload);
+    } else {
+      // Full validation for new bookings or changes requiring validation
+      const bookingsToProcess = expandRecurringBookings([booking]);
+      const prepared: PreparedBooking[] = [];
 
-  const batch = db.batch();
-  for (const entry of prepared) {
-    batch.set(entry.docRef, entry.payload);
+      for (const bookingItem of bookingsToProcess) {
+        if (!bookingItem.date) {
+          throw new BookingError(`Booking ${bookingItem.id} is missing a date field`, 400);
+        }
+
+        const workerId = bookingItem.pswWorkerId || bookingItem.userId;
+        if (!workerId) {
+          throw new BookingError(`Booking ${bookingItem.id} is missing worker/user ID`, 400);
+        }
+
+        const clientId = bookingItem.clientId;
+        if (!clientId) {
+          throw new BookingError(`Booking ${bookingItem.id} is missing client ID`, 400);
+        }
+
+        const localDate = toLocalDate(bookingItem.date as string | Date);
+        const dateString = formatLocalDate(localDate);
+
+        const workerDoc = await db.collection('psw_workers').doc(workerId).get();
+        if (!workerDoc.exists) {
+          throw new BookingError(`PSW worker with ID ${workerId} not found`, 404);
+        }
+
+        const workerData = workerDoc.data() as PSWWorker;
+        const workerName = bookingItem.pswWorkerName || `${workerData?.firstName ?? ''} ${workerData?.lastName ?? ''}`.trim() || 'Worker';
+
+        const clientDoc = await db.collection('clients').doc(clientId).get();
+        if (!clientDoc.exists) {
+          throw new BookingError(`Client with ID ${clientId} not found`, 404);
+        }
+        const clientData = clientDoc.data() as Client;
+
+        const workerLocation = (workerData.location || '').trim().toLowerCase();
+        const clientLocation = (clientData.location || '').trim().toLowerCase();
+
+        if (!workerLocation || !clientLocation || workerLocation !== clientLocation) {
+          throw new BookingError(
+            `${workerName} is not available because they are located in ${workerData.location || 'a different city'}. ` +
+              `Clients can only book PSW workers within ${clientData.location || 'their own city'}.`,
+            409,
+            {
+              workerLocation: workerData.location || null,
+              clientLocation: clientData.location || null,
+            }
+          );
+        }
+
+        const startTime = bookingItem.startTime || '09:00';
+        const endTime = bookingItem.endTime || '10:00';
+        const durationMinutes = Math.max(timeToMinutes(endTime) - timeToMinutes(startTime), 0);
+        if (durationMinutes <= 0) {
+          throw new BookingError(`Invalid time range for booking ${bookingItem.id}`, 400);
+        }
+
+        ensureAdvanceNotice(localDate, startTime);
+
+        const serviceLevel: ServiceLevel = bookingItem.serviceLevel || 'basic';
+        if (workerData.serviceLevels && !workerData.serviceLevels.includes(serviceLevel)) {
+          throw new BookingError(
+            `${workerName} does not offer the ${serviceLevel} service level.`,
+            409
+          );
+        }
+
+        const workerDayAvailability = (workerData.availability || []).filter((avail) => {
+          if (avail.dayOfWeek === undefined || avail.dayOfWeek === null) return false;
+          return avail.dayOfWeek === localDate.getDay();
+        });
+
+        if (workerDayAvailability.length === 0) {
+          throw new BookingError(`${workerName} is not available on ${dateString}`, 409);
+        }
+
+        const withinAvailability = workerDayAvailability.some((avail) => {
+          const availStart = timeToMinutes(avail.startTime);
+          const availEnd = timeToMinutes(avail.endTime);
+          const newStart = timeToMinutes(startTime);
+          const newEnd = timeToMinutes(endTime);
+          return newStart >= availStart && newEnd <= availEnd;
+        });
+
+        if (!withinAvailability) {
+          throw new BookingError(`${workerName} is not available at ${startTime}-${endTime} on ${dateString}`, 409);
+        }
+
+        const bookingsSnapshot = await db
+          .collection('bookings')
+          .where('pswWorkerId', '==', workerId)
+          .where('date', '==', dateString)
+          .get();
+
+        const existingBookingsFromCollection = bookingsSnapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+          };
+        });
+
+        const workerBookings = Array.isArray(workerData.bookings) ? normalizeWorkerBookings(workerData.bookings) : [];
+        const collectionWorkerBookings = normalizeWorkerBookings(existingBookingsFromCollection);
+
+        const combinedBookingsMap = new Map<string, WorkerBooking>();
+        for (const wb of [...workerBookings, ...collectionWorkerBookings]) {
+          combinedBookingsMap.set(wb.id, wb);
+        }
+
+        const combinedBookings = Array.from(combinedBookingsMap.values());
+        const newStart = timeToMinutes(startTime);
+        const newEnd = timeToMinutes(endTime);
+
+        const hasConflict = combinedBookings.some((existing) => {
+          const existingStart = timeToMinutes(existing.startTime);
+          const existingEnd = timeToMinutes(existing.endTime);
+          return newStart < existingEnd && newEnd > existingStart && formatLocalDate(existing.date) === dateString;
+        });
+
+        if (hasConflict) {
+          throw new BookingError(
+            `${workerName} already has a booking at ${startTime}-${endTime} on ${dateString}. Please choose a different time.`,
+            409
+          );
+        }
+
+        const createdAt = bookingItem.createdAt ? new Date(bookingItem.createdAt as string | Date) : new Date();
+        const requestedAt = bookingItem.requestedAt ? new Date(bookingItem.requestedAt as string | Date) : new Date();
+        const confirmationDeadline = bookingItem.confirmationDeadline
+          ? new Date(bookingItem.confirmationDeadline as string | Date)
+          : addHours(requestedAt, CONFIRMATION_WINDOW_HOURS);
+        const price = bookingItem.price ?? calculatePrice(workerData.hourlyRate, serviceLevel, durationMinutes);
+
+        const payload = {
+          ...bookingItem,
+          pswWorkerId: workerId,
+          date: dateString,
+          serviceLevel,
+          price,
+          status: (bookingItem.status as BookingStatus) || 'pending',
+          requestedAt: admin.firestore.Timestamp.fromDate(requestedAt),
+          confirmationDeadline: admin.firestore.Timestamp.fromDate(confirmationDeadline),
+          createdAt: admin.firestore.Timestamp.fromDate(createdAt),
+        } as Record<string, unknown>;
+
+        const sanitizedPayload = pruneUndefinedValues(payload) as Record<string, unknown>;
+
+        prepared.push({ docRef, payload: sanitizedPayload });
+      }
+
+      for (const entry of prepared) {
+        batch.set(entry.docRef, entry.payload);
+      }
+    }
   }
 
   await batch.commit();
 
-  return { count: bookingsToProcess.length };
+  return { count: bookings.length };
 }
