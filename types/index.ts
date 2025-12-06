@@ -8,6 +8,8 @@ export interface User {
 
 export type ServiceLevel = 'basic' | 'enhanced' | 'premium';
 
+export type UserRole = 'admin' | 'worker' | 'client';
+
 export interface Client {
   id: string;
   firstName: string;
@@ -18,11 +20,13 @@ export interface Client {
   phone?: string;
   createdAt: Date;
   bookings: ClientBooking[]; // Array of booking references
+  role?: UserRole;
 }
 
 export interface RecurringPattern {
   frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly';
   daysOfWeek?: number[]; // 0-6, required for weekly patterns
+  startDate?: Date;
   endDate?: Date;
 }
 
@@ -57,6 +61,14 @@ export interface PSWWorker {
   bookings: WorkerBooking[]; // Array of booking references
   createdAt: Date;
   serviceLevels?: ServiceLevel[]; // Supported service tiers
+  role?: UserRole;
+}
+
+export interface UserSession {
+  userId: string | null;
+  role: UserRole;
+  relatedWorkerId?: string | null;
+  relatedClientId?: string | null;
 }
 
 export interface WorkerAvailability {
@@ -80,7 +92,7 @@ export interface WorkerBooking {
   endTime: string;
   serviceLevel?: ServiceLevel;
   price?: number;
-  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'rejected';
   createdAt: Date;
   requestedAt?: Date;
   confirmationDeadline?: Date;
@@ -108,6 +120,9 @@ export interface ParsedBookingRequest {
   month: number;
   year: number;
   title: string;
+  startDate?: string;
+  endDate?: string;
+  frequency?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
 }
 
 export interface BookingResult {
